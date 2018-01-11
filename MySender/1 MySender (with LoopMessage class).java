@@ -10,33 +10,22 @@ global class MySender {
     public webService static string myApexMethod(string stringIds) {
         List<Id> ids = stringIds.split(',');
         
-        // CHANGE ANY FILTER (WHERE) CRITERIA NECESSARY
-        List<Loop__DDP__c> ddps = [SELECT Id, (SELECT Id FROM Loop__Custom_Integration_Options__r WHERE Name IN ('My Delivery Option','Document Queue')) FROM Loop__DDP__c WHERE Name IN ('My DDP','My Other DDP')];
+        // CHANGE ANY FILTER (the WHERE clause) CRITERIA NECESSARY
+        List<Loop__DDP__c> ddps = [SELECT Id, (SELECT Id FROM Loop__Custom_Integration_Options__r WHERE Name = 'My Delivery Option') FROM Loop__DDP__c WHERE Name = 'My DocGen Package'];
         
         if (ddps == null || ddps.size() < 1) {
             // CHANGE THE EXCEPTION MESSAGE IF DESIRED
             throw new MissingDDPInfoException('A DDP specified was not found.');
         }
-        else {
-            for (Loop__DDP__c ddp : ddps) {
-                if (ddp.Loop__Custom_Integration_Options__r == null || ddp.Loop__Custom_Integration_Options__r.size() < 1)
-                    // CHANGE THE EXCEPTION MESSAGE IF DESIRED
-                    throw new MissingDDPInfoException('A Delivery Option specified was not found.');
-            }
+        
+        Loop__DDP__c ddp = ddps[0];
+        
+        if (ddp.Loop__Custom_Integration_Options__r == null || ddp.Loop__Custom_Integration_Options__r.size() < 1) {
+            // CHANGE THE EXCEPTION MESSAGE IF DESIRED
+            throw new MissingDDPInfoException('A Delivery Option specified was not found.');
         }
         
-        // GET RECORDS TO RUN DDPS FOR
-        Map<Id, List<SObject__c>> ddpIdsAndObjects = new Map<Id, List<SObject__c>>();
-        for (SObject__c so : [SELECT Id, Fields FROM SObject__c WHERE Id IN :ids]) {
-            for (Loop__DDP__c ddp : ddps) {
-                if (/*CRITERIA THAT DETERMINES WHICH RECORD NEEDS WHICH DDP*/) {
-                    if (!ddpIdsAndObjects.containsKey(ddp.Id))
-                        ddpIdsAndObjects.put(ddp.Id, new List<SObject__c>());
-                    ddpIdsAndObjects.get(ddp.Id).add(so);
-                    break;
-                }
-            }
-        }
+        Id deliveryId = ddp.Loop__Custom_Integration_Options__r[0].Id;
         
         Loop.loopMessage lm = new Loop.loopMessage();
         
@@ -50,26 +39,24 @@ global class MySender {
         //lm.batchNotification = Loop.loopMessage.Notification.ON_ERROR;
         
         // LOOP THROUGH WHATEVER COLLECTIONS NECESSARY FOR THE DDP REQUESTS
-        for (Id ddpId : ddpIdsAndObjects.keySet()) {
-            for (SObject__c myObject : ddpIdsAndObjects.get(ddpId)) {
-                
-                // ADD A DDP RUN REQUEST
-                lm.requests.add(new Loop.loopMessage.loopMessageRequest(
-                    myObject.Id, // MAIN RECORD ID - SAME OBJECT AS THE DDP RECORD TYPE SPECIFIES
-                    ddpId, // DDP ID
-                    new Map<string, string>{
-                        'deploy' => 'autoemail', // THIS COULD BE A DELIVERY OPTION ID INSTEAD
-                        'SFAccount' => myObject.Account__c,
-                        'SFContact' => myObject.Contact__c
-                        // THESE PARAMETERS ARE THE SAME AS THOSE FOUND IN OUR OUTBOUND MESSAGE DOCUMENTATION
-                        // PLEASE REFERENCE THAT DOCUMENTATION FOR ADDITIONAL OPTIONS
-                        // 'attachIds' => attachmentIdsVariable
-                        // 'deploytype' => 'autodocusign' // IF deploy IS A DOCUSIGN DELIVERY OPTION ID
-                        // 'deploytype' => 'autoemail' // IF deploy IS AN EMAIL DELIVERY OPTION ID
-                    }
-                ));
-            }
+        for (Contact c : [SELECT Id FROM Contact WHERE Id IN :ids]) {
+            // ADD A DDP RUN REQUEST
+            lm.requests.add(new Loop.loopMessage.loopMessageRequest(
+                c.Id, // MAIN RECORD ID - SAME OBJECT AS THE DDP RECORD TYPE SPECIFIES
+                ddp.Id, // DDP ID
+                new Map<string, string>{
+                    'deploy' => deliveryId,
+                    'SFAccount' => c.AccountId
+                    // THESE PARAMETERS ARE THE SAME AS THOSE FOUND IN OUR OUTBOUND MESSAGE DOCUMENTATION
+                    // PLEASE REFERENCE THAT DOCUMENTATION FOR ADDITIONAL OPTIONS
+                    // 'SFObject_Name__c' => recordId
+                    // 'attachIds' => attachmentIdsVariable
+                    // 'deploytype' => 'autodocusign' // IF deploy IS A DOCUSIGN DELIVERY OPTION ID
+                    // 'deploytype' => 'autoemail' // IF deploy IS AN EMAIL DELIVERY OPTION ID
+                }
+            ));
         }
+        
         // SEND ALL DDP RUN REQUESTS IN A SINGLE CALL OUT
         lm.sendAllRequests();
         
@@ -82,12 +69,15 @@ global class MySender {
 private class MySenderTest {
     private static testMethod void testMySender() {
         // CREATE TEST DATA
-        SObject__c so = new SObject__c();
-        insert so;
+        Account a = new Account(Name = 'test');
+        insert a;
+        
+        Contact c = new Contact(LastName = 'test', AccountId = a.Id);
+        insert c;
         
         // SEND DDPS WITHOUT DDP DATA
         try {
-            MySender.myApexMethod(string.valueOf(so.Id));
+            MySender.myApexMethod(string.valueOf(c.Id));
             system.assert(false);
         } catch (Exception ex) {
             system.assert(ex instanceOf MissingDDPInfoException);

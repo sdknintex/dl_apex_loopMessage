@@ -57,8 +57,19 @@ global class MySender {
             ));
         }
         
-        // SEND ALL DDP RUN REQUESTS IN A SINGLE CALL OUT
-        lm.sendAllRequests();
+        // ADD RETRY LOGIC TO HANDLE TRANSIENT ERRRORS
+        Integer attempts = 1;
+        Boolean success = false;
+        while(!success && attempts <= 3) {
+            try {
+                // SEND ALL DDP RUN REQUESTS IN A SINGLE CALL OUT
+                lm.sendAllRequests();
+                success = true;
+            } catch (CalloutException e) {
+                System.debug('loopMessage request failed. Cause: ' + e.getMessage());
+            }
+            attempts ++;
+        }
         
         return 'Your requests are being processed.';
     }
